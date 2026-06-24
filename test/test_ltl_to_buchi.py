@@ -2,10 +2,16 @@ import unittest
 from itertools import combinations, product
 
 from tutorials.buchi.ltl import Atom, F, G, Implies, Next, Not, Or, R, U, W, X, atoms, satisfies
-from tutorials.buchi.ltl_to_buchi import ltl_to_buchi, ltl_to_gba
+from tutorials.buchi.gpvw_ltl_to_buchi import ltl_to_buchi_gpvw as ltl_to_buchi, ltl_to_gba_gpvw
 from tutorials.buchi.omega_word import OmegaWord
 
 P, Q = Atom("p"), Atom("q")
+
+
+def ltl_to_gba(formula):
+    """GBA half of the GPVW result (``ltl_to_gba_gpvw`` returns ``(gba, nodes)``)."""
+    gba, _ = ltl_to_gba_gpvw(formula)
+    return gba
 
 
 def _enumerate_lassos(ap, max_stem=2, max_loop=2):
@@ -81,10 +87,17 @@ class TestLTLToBuchiStructure(unittest.TestCase):
         self.assertTrue(satisfies(formula, result.witness))
 
     def test_gba_one_accepting_set_per_until(self) -> None:
-        """The generalized automaton has exactly one accepting set per Until subformula."""
-        # F p = true U p, and G(F p) = ¬(true U ¬(true U p)) -> two Until subformulas.
-        gba = ltl_to_gba(G(F(P)))
-        self.assertEqual(len(gba.accepting_sets), 2)
+        """The generalized automaton has exactly one accepting set per Until sub-formula.
+
+        The GPVW algorithm works on the NNF of the formula:
+          G(F p) in NNF = false R (true U p)  → 1 Until sub-formula → 1 accepting set.
+          F p   in NNF = true U p              → 1 Until sub-formula → 1 accepting set.
+          p ∧ q (propositional)                → 0 Until sub-formulas → 0 accepting sets.
+        """
+        gba_gfp = ltl_to_gba(G(F(P)))
+        self.assertEqual(len(gba_gfp.accepting_sets), 1)
+        gba_fp = ltl_to_gba(F(P))
+        self.assertEqual(len(gba_fp.accepting_sets), 1)
         # A purely propositional formula has no Until -> no acceptance constraints.
         self.assertEqual(len(ltl_to_gba(P & Q).accepting_sets), 0)
 

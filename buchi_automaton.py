@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from typing import Deque, Dict, Hashable, Iterable, List, Optional, Set, Tuple
+from typing import Deque, Dict, FrozenSet, Hashable, Iterable, List, Optional, Set, Tuple
 
 from .omega_word import Letter, OmegaWord
 from .tarjan import tarjan_scc
@@ -218,6 +218,95 @@ class BuchiAutomaton:
             raise ValueError(f"State {state!r} has no cycle within its SCC (internal error).")
         return best
 
+    def _shortest_path_states(
+        self, sources: Iterable[State], target: State, allowed: Set[State]
+    ) -> List[State]:
+        """BFS shortest state sequence from any source to ``target`` within ``allowed``.
+
+        :return: list of states ``[source, ..., target]`` (inclusive), length >= 1.
+        """
+        sources_set = set(sources)
+        if target in sources_set:
+            return [target]
+        parent: Dict[State, State] = {}
+        visited: Set[State] = set(sources_set)
+        queue: Deque[State] = deque(sources_set)
+        while queue:
+            state = queue.popleft()
+            for _, dst in self.successors(state):
+                if dst not in allowed or dst in visited:
+                    continue
+                visited.add(dst)
+                parent[dst] = state
+                if dst == target:
+                    path: List[State] = []
+                    node = dst
+                    while node not in sources_set:
+                        path.append(node)
+                        node = parent[node]
+                    path.append(node)
+                    path.reverse()
+                    return path
+                queue.append(dst)
+        raise ValueError(f"No path to {target!r}; automaton is inconsistent.")
+
+    def _shortest_cycle_states(self, state: State, scc_set: Set[State]) -> List[State]:
+        """Shortest state sequence forming a cycle ``state → … → state`` inside ``scc_set``.
+
+        :return: list ``[state, ..., state]`` of length >= 2.
+        """
+        best: Optional[List[State]] = None
+        for _, succ in self.successors(state):
+            if succ not in scc_set:
+                continue
+            if succ == state:
+                return [state, state]
+            try:
+                rest = self._shortest_path_states({succ}, state, scc_set)
+            except ValueError:
+                continue
+            candidate = [state] + rest
+            if best is None or len(candidate) < len(best):
+                best = candidate
+        if best is None:
+            raise ValueError(f"State {state!r} has no cycle within its SCC (internal error).")
+        return best
+
+    def check_emptiness_with_states(
+        self,
+    ) -> Tuple[bool, Optional[List[State]], Optional[List[State]]]:
+        """Emptiness check that also returns the concrete state trace of the witness lasso.
+
+        Uses Tarjan's SCC algorithm (via :func:`tarjan.tarjan_scc`) to find the first
+        non-trivial reachable SCC containing an accepting state, then reconstructs the
+        shortest stem and shortest cycle through that state.
+
+        :return: a triple ``(is_empty, prefix_states, cycle_states)``:
+
+          - ``is_empty``: ``True`` when the language is empty.
+          - ``prefix_states``: when non-empty, the state sequence
+            ``[initial, …, accepting]`` (inclusive) — the *stem* of the lasso.
+          - ``cycle_states``: when non-empty, ``[accepting, …, accepting]``
+            (inclusive, length ≥ 2) — the *loop* of the lasso.
+
+        To obtain the finite satisfying path (truncated before the repetitive part),
+        use only ``prefix_states``.
+        """
+        reachable = self.reachable_states()
+        graph = self.state_graph(restrict=reachable)
+        for component in tarjan_scc(graph):
+            scc_set = set(component)
+            if not self._is_non_trivial(component, scc_set, graph):
+                continue
+            accepting = [s for s in component if s in self.accepting_states]
+            if not accepting:
+                continue
+            acc_state = accepting[0]
+            prefix_states = self._shortest_path_states(self.initial_states, acc_state, reachable)
+            cycle_states = self._shortest_cycle_states(acc_state, scc_set)
+            return False, prefix_states, cycle_states
+        return True, None, None
+
     # ------------------------------------------------------------------ verifier
     def accepts(self, word: OmegaWord) -> bool:
         """Check whether the automaton has an accepting run on the lasso ``word``.
@@ -350,5 +439,74 @@ def intersect(a1: BuchiAutomaton, a2: BuchiAutomaton) -> BuchiAutomaton:
                     product.add_transition(
                         (q1, q2, 2), letter, (q1_next, q2_next, 1 if q2_is_goal else 2)
                     )
+
+    return product
+
+
+# Product state: (Kripke state, Büchi state).
+KripkeBuchiState = Tuple[State, State]
+
+
+def kripke_buchi_product(kripke: object, buchi: BuchiAutomaton) -> BuchiAutomaton:
+    """Build the synchronous product automaton ``M × B`` for automata-theoretic model checking.
+
+    Given a Kripke model ``M = (S, S₀, →, L)`` and a Büchi automaton ``B = (Q, Σ, δ, Q₀, F)``
+    over the atomic propositions of an LTL formula ``¬φ``, the product ``M × B`` is a Büchi
+    automaton whose language is non-empty iff ``M`` has a path that *satisfies* ``φ``.
+
+    **Construction** (source-labelling convention, matching :func:`gpvw_ltl_to_buchi.ltl_to_buchi_gpvw`):
+
+    - **States**: ``S × Q``.
+    - **Initial**: ``S₀ × Q₀``.
+    - **Accepting**: ``S × F``.
+    - **Transitions**: ``(s, q) → (s', q')`` whenever ``s → s'`` in ``M`` and
+      ``q --L_B(s)--> q'`` in ``B``, where ``L_B(s) = L(s) ∩ AP(B)`` is the Kripke label
+      restricted to ``B``'s atomic propositions.
+
+    The self-loops on the Kripke model (one per state) ensure every state has at least one
+    successor, so the product is *total*, and every non-trivial SCC in the product corresponds
+    to an infinite path in ``M``.
+
+    :param kripke: a :class:`~kripke.KripkeModel` (duck-typed: needs ``states``,
+        ``initial_states``, ``labeling``, and ``successors``).
+    :param buchi: Büchi automaton built from ``¬φ`` (or from ``φ`` directly to find a
+        witness *satisfying* ``φ``).
+    :return: a new :class:`BuchiAutomaton` representing ``M × B``.
+    """
+    # Collect B's APs from transition labels so we can project L(s) correctly.
+    buchi_aps: FrozenSet = frozenset(
+        p for q in buchi.states for letter, _ in buchi.successors(q) for p in letter
+    )
+
+    # Index Büchi transitions: (q, letter) → [q'] for fast lookup.
+    b_by_letter: Dict[Tuple, List] = {}
+    for q in buchi.states:
+        for letter, q_next in buchi.successors(q):
+            b_by_letter.setdefault((q, letter), []).append(q_next)
+
+    product = BuchiAutomaton()
+
+    # All product states.
+    for s in kripke.states:
+        for q in buchi.states:
+            product.add_state((s, q))
+
+    # Initial product states.
+    for s0 in kripke.initial_states:
+        for q0 in buchi.initial_states:
+            product.add_initial_state((s0, q0))
+
+    # Accepting product states: those whose Büchi component is accepting.
+    for s in kripke.states:
+        for q in buchi.accepting_states:
+            product.add_accepting_state((s, q))
+
+    # Transitions: synchronized on L_B(s) = L(s) ∩ AP(B).
+    for s in kripke.states:
+        s_b_label: FrozenSet = frozenset(kripke.labeling.get(s, frozenset())) & buchi_aps
+        for _, s_next in kripke.successors(s):
+            for q in buchi.states:
+                for q_next in b_by_letter.get((q, s_b_label), ()):
+                    product.add_transition((s, q), s_b_label, (s_next, q_next))
 
     return product

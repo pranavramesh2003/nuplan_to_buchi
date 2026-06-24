@@ -10,7 +10,7 @@ Two things live here besides the syntax:
 * :meth:`LTLFormula.to_core` rewrites any formula into the **core fragment**
   ``{atom, true, ¬, ∧, X, U}``. Every other operator is syntactic sugar over it
   (``F φ = true U φ``, ``G φ = ¬(true U ¬φ)``, ``φ R ψ = ¬(¬φ U ¬ψ)``, …). The
-  tableau construction in :mod:`ltl_to_buchi` only has to handle the core.
+  GPVW construction in :mod:`gpvw_ltl_to_buchi` only has to handle the core.
 * :func:`satisfies` is a direct, operator-complete semantics over *lasso* words
   (:class:`omega_word.OmegaWord`). It is independent of the automaton construction and is
   used to cross-check that the generated Büchi automaton accepts exactly the models of φ.
