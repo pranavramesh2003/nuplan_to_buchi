@@ -243,12 +243,7 @@ animate_nuplan_path(draw_G, pos, object_types, ego_id, path,
 **Example output** — the 115-step witness for `φ = F(64385 ∧ F(G(63680)))` on a 700-node
 subgraph (example 6a in the notebook), animated with `window=5`, `path_only=True`:
 
-<video src="examples/traversal_6a.mp4" controls muted loop width="640">
-  Your viewer can't play inline video —
-  <a href="examples/traversal_6a.mp4">watch <code>examples/traversal_6a.mp4</code></a>.
-</video>
-
-*(Renders in local Markdown previews such as VS Code; on GitHub, use the fallback link.)*
+<video src="examples/traversal_6a.mp4" controls muted loop width="640"></video>
 
 ## Internal helpers
 
