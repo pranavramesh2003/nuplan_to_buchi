@@ -200,6 +200,55 @@ See [`examples/visualization_demo.ipynb`](examples/visualization_demo.ipynb) (Ne
 [`examples/visualization_graphviz.ipynb`](examples/visualization_graphviz.ipynb) (Graphviz)
 for visual tours.
 
+### NuPlan lane-graph traversal video (`nuplan_graph.py`)
+
+The NuPlan model-checking layer draws lane/connector subgraphs with NetworkX
+(`draw_nuplan_subgraph`, `draw_nuplan_path`, `draw_nuplan_nodes`). To turn a static
+witness into a **node-by-node traversal video**, `animate_nuplan_path` animates a path
+with a **sliding highlight window**:
+
+- the current node (the *head*) is drawn **crimson** and enlarged;
+- the previous `window − 1` nodes trail behind it in **orange**;
+- earlier nodes fade back to their base lane/connector colour, so the highlighted band
+  visibly *slides* along the route like a comet;
+- the goal stays **green** and the ego **yellow**, matching `draw_nuplan_path`.
+
+```python
+from tutorials.buchi.nuplan_graph import animate_nuplan_path
+
+# `path` is a list of node IDs in traversal order (e.g. a model-checking lasso stem).
+animate_nuplan_path(
+    draw_G, pos, object_types, ego_id, path,
+    window=3, fps=6,             # 3-node comet tail, 6 nodes/sec
+    output_path='traversal.mp4',  # H.264 via ffmpeg; use .gif for Pillow
+)
+```
+
+| Option | Effect |
+|---|---|
+| `window` | trailing-highlight length; `1` spotlights only the current node |
+| `fps` | playback / video frame rate |
+| `output_path` | write a file — `.mp4` (H.264 via ffmpeg) or `.gif` (Pillow); omit for an inline player |
+| `label_window_only` | label only the lit nodes each frame (keeps long paths legible) |
+| `show_labels` | draw node-ID labels (default `True`) |
+
+With no `output_path` the call returns a self-contained **HTML5/JS player** (needs no
+ffmpeg); with one it writes the file and returns an inline `Video`. `.mp4` requires
+ffmpeg (`apt-get install ffmpeg`); without it the writer falls back to a sibling `.gif`.
+
+The high-level wrapper `nuplan_modelcheck.animate_solution(solution, window=…)` takes a
+`PathSolution` from `solve_for_path` and forwards to `animate_nuplan_path`, adding the
+`path_only=True` subgraph-trimming used by `visualize_solution`:
+
+```python
+from tutorials.buchi.nuplan_modelcheck import solve_for_path, animate_solution
+
+solution = solve_for_path(graph, object_types, ego_id, pos, formula, prop_nodes)
+animate_solution(solution, window=3, fps=2, output_path='traversal.mp4')
+```
+
+See [`examples/visualize_nuplan.ipynb`](examples/visualize_nuplan.ipynb) §7 for a full tour.
+
 ## Tests
 
 ```bash
